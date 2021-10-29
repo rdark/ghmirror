@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # Mirror a GitHub org's repositories
 
+import argparse
 import os
 from pathlib import Path
 
-from github import Github
 import git
-import argparse
+from github import Github
 
 GITHUB_TOKEN = 'GITHUB_TOKEN'
 
