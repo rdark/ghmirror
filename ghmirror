@@ -1,0 +1,76 @@
+#!/usr/bin/env python
+# Mirror a GitHub org's repositories
+
+import os
+from pathlib import Path
+
+from github import Github
+import git
+import argparse
+
+GITHUB_TOKEN = 'GITHUB_TOKEN'
+
+
+class LocalFs:
+    def __init__(self, org: str, basedir: str) -> None:
+        self._basedir = Path(basedir)
+        self._orgdir = self._basedir.joinpath(org)
+
+    @property
+    def orgdir(self) -> Path:
+        return self._orgdir
+
+    @property
+    def basedir(self) -> Path:
+        return self._basedir
+
+    def ensure_dirs(self) -> None:
+        for d in self.basedir, self.orgdir:
+            if not d.exists():
+                d.mkdir(mode=0o755)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--repo-type', type=str, default='all',
+                        help='Type of repos to mirror. Valid arguments: '
+                             '"all", "public", "private", "forks", "sources", "member"')
+    parser.add_argument('--github-org', type=str, required=True,
+                        help='Name of GitHub Org')
+    parser.add_argument('--github-token', type=str, default=os.environ.get(GITHUB_TOKEN),
+                        help=f'Github access token (alternatively taken from environment variable {GITHUB_TOKEN})')
+    parser.add_argument('--local-path', type=str, default='repos',
+                        help='Path to store repository mirrors')
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    local_fs = LocalFs(org=args.github_org, basedir=args.local_path)
+    local_fs.ensure_dirs()
+    g = Github(args.github_token)
+
+    for repo in g.get_organization(args.github_org).get_repos(type=args.repo_type):
+        print(f'working with repo {args.github_org}/{repo.name} (size: {repo.size / 1000}M)')
+        repo_path = local_fs.orgdir.joinpath(repo.name)
+        if not repo_path.exists():
+            print(f'repo {args.github_org}/{repo.name} did not exist locally - cloning')
+            git.Repo.clone_from(
+                url=repo.clone_url,
+                to_path=repo_path,
+                multi_options=['--mirror'],
+            )
+        else:
+            print(f'repo {args.github_org}/{repo.name} exists locally - fetching latest updates')
+            local_repo = git.Repo(path=repo_path)
+            remote_name = 'origin'
+
+            if local_repo.remote(remote_name).url != repo.clone_url:
+                raise Exception('url for remote {0} configured at {1}'
+                                'does not match {2}'.format(remote_name, repo_path, repo.clone_url))
+
+            if not local_repo.bare:
+                raise Exception('repo at {0} is not bare'.format(repo_path))
+
+            local_repo.remote(remote_name).fetch()
